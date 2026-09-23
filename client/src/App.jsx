@@ -17,7 +17,6 @@ import ChatWindow from "./pages/chat/ChatWindow";
 import AIChatWindow from "./pages/chat/AIChatWindow";
 import Profile from "./pages/settings/Profile";
 import UserProfile from "./pages/settings/UserProfile";
-import Tasks from "./pages/features/tasks/Tasks";
 import Settings from "./pages/settings/Settings";
 import Appearance from "./pages/settings/Appearance";
 import BlockedUsers from "./pages/settings/BlockedUsers";
@@ -78,10 +77,6 @@ function App() {
               <Route
                 path="/user/:userId"
                 element={hasToken ? <UserProfile /> : <Navigate to="/login" />}
-              />
-              <Route
-                path="/tasks"
-                element={hasToken ? <Tasks /> : <Navigate to="/login" />}
               />
               <Route
                 path="/settings"

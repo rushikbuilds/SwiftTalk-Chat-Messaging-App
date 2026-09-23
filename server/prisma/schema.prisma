@@ -31,7 +31,6 @@ model User {
   chatVisibility     ChatVisibility[]
   blockedUsers       BlockedUser[]   @relation("blockedUsers")
   blockedBy          BlockedUser[]   @relation("blockedByUsers")
-  tasks              Task[]
   aiSessions         AISession[]
   pushSubscription   PushSubscription?
 }
@@ -123,55 +122,6 @@ model Message {
   visibility     MessageVisibility[]
 }
 
-model Task {
-  task_id       Int        @id @default(autoincrement())
-  user_id       Int
-  title         String
-  description   String?    @db.Text
-  status        String     @default("pending")
-  priority      String     @default("medium")
-  due_date      DateTime?
-  completed_at  DateTime?
-  created_at    DateTime   @default(now())
-  updated_at    DateTime   @updatedAt
-  category      String?    // 'personal', 'work', 'shopping', etc.
-  tags          TaskTag[]
-  subtasks      Subtask[]
-
-  // For future features
-  // reminders     TaskReminder[]
-  // attachments   TaskAttachment[]
-  // shared_with   SharedTask[]
-
-  user User @relation(fields: [user_id], references: [user_id], onDelete: Cascade)
-
-  @@index([user_id, status])
-  @@index([user_id, due_date])
-}
-
-model Subtask {
-  subtask_id   Int       @id @default(autoincrement())
-  task_id      Int
-  title        String
-  is_completed Boolean   @default(false)
-  completed_at DateTime?
-  created_at   DateTime  @default(now())
-  order        Int       @default(0)
-
-  task Task @relation(fields: [task_id], references: [task_id], onDelete: Cascade)
-
-  @@index([task_id])
-}
-
-model TaskTag {
-  task_id    Int
-  tag_name   String
-  created_at DateTime @default(now())
-
-  task Task @relation(fields: [task_id], references: [task_id], onDelete: Cascade)
-
-  @@id([task_id, tag_name])
-}
 
 model MessageStatus {
   message_id Int

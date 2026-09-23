@@ -20,12 +20,12 @@
 
 ---
 
-SwiftTalk is a modern, high-performance messaging platform built for scale. It features a **hybrid polyglot persistence architecture** (MySQL for relational identity, auth, and tasks; MongoDB for high-throughput chats, messages, and read receipts), decouples the REST API server from dedicated WebSocket instances using Redis pub/sub for horizontal scalability, and integrates AI assistance, web push notifications, and OAuth.
+SwiftTalk is a modern, high-performance messaging platform built for scale. It features a **hybrid polyglot persistence architecture** (MySQL for relational identity, auth, and security; MongoDB for high-throughput chats, messages, and read receipts), decouples the REST API server from dedicated WebSocket instances using Redis pub/sub for horizontal scalability, and integrates AI assistance, web push notifications, and OAuth.
 
 ## ✨ Features
 
 - **Real-Time Communication**: Instant delivery, live typing indicators, read receipts, and online/offline status via Socket.IO.
-- **Polyglot Persistence**: Hybrid architecture pairing **MySQL (Prisma)** for strict ACID compliance (user accounts, authentication, sessions, tasks, blocklists) with **MongoDB (Mongoose)** for flexible, high-throughput chat rooms, messages, attachments, and receipts.
+- **Polyglot Persistence**: Hybrid architecture pairing **MySQL (Prisma)** for strict ACID compliance (user accounts, authentication, sessions, blocklists) with **MongoDB (Mongoose)** for flexible, high-throughput chat rooms, messages, attachments, and receipts.
 - **Scalable Architecture**: Dedicated WebSocket server (`:3002`) decoupled from REST API (`:3001`), horizontally scaled via `@socket.io/redis-adapter` and `@socket.io/redis-emitter`.
 - **AI-Powered Assistance**: Smart replies, chat summarization, and message translation powered by Groq (LLaMA 3.3).
 - **Rich Media & File Sharing**: Instant image previews, chunked file transfers for large attachments, and document sharing.
@@ -41,14 +41,14 @@ SwiftTalk is a modern, high-performance messaging platform built for scale. It f
   <img src="assets/architecture.png" alt="SwiftTalk System Architecture" width="100%">
 </p>
 
-| Service              | Port    | Technology               | Purpose                                                 |
-| :------------------- | :------ | :----------------------- | :------------------------------------------------------ |
-| **Frontend Client**  | `3000`  | React 19, Vite           | Web application UI                                      |
-| **REST API Server**  | `3001`  | Express, Prisma, Mongoose| Authentication, users, chats, messages, AI, uploads     |
-| **WebSocket Server** | `3002`  | Socket.IO, Redis Adapter | Real-time events, messaging, presence, receipts         |
-| **Redis**            | `6379`  | Redis 6.2                | Pub/Sub message broker, presence, & message cache       |
-| **MySQL Database**   | `3306`  | MySQL 8.0 (Prisma)       | Users, auth, sessions, OTPs, tasks, blocklists          |
-| **MongoDB Database** | `27017` | MongoDB 7.0 (Mongoose)   | Chats, messages, attachments, delivery/read receipts    |
+| Service              | Port    | Technology                | Purpose                                              |
+| :------------------- | :------ | :------------------------ | :--------------------------------------------------- |
+| **Frontend Client**  | `3000`  | React 19, Vite            | Web application UI                                   |
+| **REST API Server**  | `3001`  | Express, Prisma, Mongoose | Authentication, users, chats, messages, AI, uploads  |
+| **WebSocket Server** | `3002`  | Socket.IO, Redis Adapter  | Real-time events, messaging, presence, receipts      |
+| **Redis**            | `6379`  | Redis 6.2                 | Pub/Sub message broker, presence, & message cache    |
+| **MySQL Database**   | `3306`  | MySQL 8.0 (Prisma)        | Users, auth, sessions, OTPs, blocklists              |
+| **MongoDB Database** | `27017` | MongoDB 7.0 (Mongoose)    | Chats, messages, attachments, delivery/read receipts |
 
 ---
 
@@ -93,9 +93,6 @@ cp client/.env.example client/.env
 cd server
 npx prisma migrate dev
 
-# Optional: Migrate existing chat data from MySQL to MongoDB
-npm run db:migrate:mongo
-
 # 4. Start backend (runs both REST API on :3001 and WS on :3002 concurrently)
 npm run dev
 
@@ -108,15 +105,15 @@ npm start
 
 ## ⚙️ Key Scripts
 
-| Directory     | Command                   | Description                                                        |
-| :------------ | :------------------------ | :----------------------------------------------------------------- |
-| **`/server`** | `npm run dev`             | Runs both API (`:3001`) and WS (`:3002`) concurrently with nodemon |
-| **`/server`** | `npm run dev:api`         | Runs REST API server only                                          |
-| **`/server`** | `npm run dev:ws`          | Runs WebSocket server only                                         |
-| **`/server`** | `npm run db:migrate:mongo`| Migrates chats, messages & receipts from MySQL to MongoDB          |
-| **`/server`** | `npm run db:studio`       | Launches Prisma Studio GUI                                         |
-| **`/client`** | `npm start`               | Starts Vite development server (`:3000`)                           |
-| **`/client`** | `npm run build`           | Builds production bundle                                           |
+| Directory     | Command                    | Description                                                        |
+| :------------ | :------------------------- | :----------------------------------------------------------------- |
+| **`/server`** | `npm run dev`              | Runs both API (`:3001`) and WS (`:3002`) concurrently with nodemon |
+| **`/server`** | `npm run dev:api`          | Runs REST API server only                                          |
+| **`/server`** | `npm run dev:ws`           | Runs WebSocket server only                                         |
+| **`/server`** | `npm run db:migrate:mongo` | Migrates chats, messages & receipts from MySQL to MongoDB          |
+| **`/server`** | `npm run db:studio`        | Launches Prisma Studio GUI                                         |
+| **`/client`** | `npm start`                | Starts Vite development server (`:3000`)                           |
+| **`/client`** | `npm run build`            | Builds production bundle                                           |
 
 ---
 

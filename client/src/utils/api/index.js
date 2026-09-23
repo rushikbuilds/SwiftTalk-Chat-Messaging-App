@@ -24,11 +24,6 @@ export {
   batchPinChats,
 } from "./chatService";
 export {
-  fetchUserTasks,
-  deleteTask,
-  updateTaskStatus,
-} from "./taskService";
-export {
   fetchPublicProfile,
   fetchPersonalProfile,
   uploadProfilePicture,

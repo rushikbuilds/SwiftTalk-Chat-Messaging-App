@@ -89,7 +89,6 @@ const authRoutes = require('./routes/auth.routes');
 const uploadRoutes = require('./routes/upload.routes');
 const notificationRoutes = require('./routes/notification.routes');
 const aiRoutes = require('./routes/ai.routes');
-const taskRoutes = require('./routes/task.router');
 
 app.use(passport.initialize());
 app.use(passport.session());
@@ -101,7 +100,6 @@ app.use('/api/chats', chatRoutes);
 app.use('/api/notifications', notificationRoutes);
 app.use('/uploads', uploadRoutes);
 app.use('/api/ai', aiRoutes);
-app.use('/api/tasks', taskRoutes);
 
 app.use(express.static('.'));
 

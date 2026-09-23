@@ -1,5 +1,5 @@
 import { useNavigate, useLocation } from "react-router-dom";
-import { MessageCircle, Settings, ListTodo } from "lucide-react";
+import { MessageCircle, Settings } from "lucide-react";
 import "./BottomTabBar.css";
 
 const BottomTabBar = ({ activeTab }) => {
@@ -8,7 +8,6 @@ const BottomTabBar = ({ activeTab }) => {
 
   const tabs = [
     { id: "chats", label: "Chats", icon: MessageCircle, path: "/chats" },
-    { id: "tasks", label: "Tasks", icon: ListTodo, path: "/tasks" },
     { id: "settings", label: "Settings", icon: Settings, path: "/settings" },
   ];
 
