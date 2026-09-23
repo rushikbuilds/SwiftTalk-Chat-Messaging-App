@@ -5,61 +5,6 @@
 
 import axiosInstance from "./axiosInstance";
 
-const getApiBaseUrl = () => axiosInstance.defaults.baseURL || "http://localhost:3001";
-
-export const createNewSession = async() => {
-  try {
-    const response = await axiosInstance.post(`/api/ai/sessions`);
-    const data = response.data;
-    const sessionId = data?.sessionId || data?.session_id || data?.data?.sessionId || data?.data?.session_id;
-
-    if (sessionId) {
-      return {
-        ...data,
-        sessionId,
-        session_id: sessionId,
-      };
-    }
-
-    return data;
-  } catch (error) {
-    console.error('Failed to create new session', error);
-    return null;
-  }
-}
-
-export const loadSession = async(sessionId) => {
-  try {
-    if (!sessionId) {
-      throw new Error('Session ID is required');
-    }
-    const response = await axiosInstance.get(`/api/ai/sessions/${sessionId}`);
-    return response.data;
-  } catch (error) {
-    console.error('Failed to load session:', error);
-    return null;
-  }
-}
-
-export const deleteSession = async(sessionId) => {
-  try {
-    await axiosInstance.delete(`/api/ai/sessions/${sessionId}`);
-    return true;
-  } catch (error) {
-    console.error('Failed to delete the session');
-  }
-}
-
-export const getSessionList = async() => {
-  try {
-    const response = await axiosInstance.get(`/api/ai/sessions`);
-    return response.data.sessions || [];
-  } catch (error) {
-    console.error('Failed to fetch session list', error);
-    return [];
-  } 
-}
-
 /**
  * Get smart reply suggestions for a chat
  * @param {number} chatId - The chat ID
@@ -151,45 +96,12 @@ export const getConversationStarters = async (chatId) => {
   }
 };
 
-export const streamAIMessage = async (message, sessionId, conversationHistory = []) => {
-  const token = localStorage.getItem("accessToken");
-
-  return fetch(`${getApiBaseUrl()}/api/ai/chat-stream`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Accept: "text/event-stream",
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-    },
-    body: JSON.stringify({
-      message,
-      session_id: sessionId,
-      conversation_history: conversationHistory,
-    }),
-  });
-};
-
-// AI Assistant info constant
-export const AI_ASSISTANT = {
-  id: 'ai-assistant',
-  name: 'AI Assistant',
-  avatar: '🤖',
-  description: 'Your helpful AI companion powered by Gemini',
-  isAI: true,
-};
-
 const aiClient = {
   getSmartReplies,
   translateText,
   summarizeChat,
   detectLanguage,
   getConversationStarters,
-  streamAIMessage,
-  loadSession,
-  createNewSession,
-  deleteSession,
-  getSessionList,
-  AI_ASSISTANT,
 };
 
 export default aiClient;

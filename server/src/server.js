@@ -6,7 +6,6 @@ const { initSocketEmitter } = require('./socket/socketEmitter');
 const { testConnection } = require('./config/database');
 const { initRedis, closeRedis, isAvailable: isRedisAvailable } = require('./config/redis');
 const { connectMongo, disconnectMongo, isMongoConnected } = require('./config/mongo');
-const { initSessionCleanupCron } = require("./cron/sessionCleanup")
 const passport = require('./config/passport');
 
 const dotenv = require('dotenv');
@@ -182,8 +181,6 @@ async function startServer() {
   server.listen(PORT, () => {
     console.log(`SwiftTalk server running on port ${PORT}`);
   });
-
-  initSessionCleanupCron();
 }
 
 if (require.main === module) {

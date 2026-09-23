@@ -4,7 +4,6 @@ import SimpleBar from "simplebar-react";
 import "simplebar-react/dist/simplebar.min.css";
 import {
   UserRound,
-  LockKeyhole,
   ShieldCheck,
   Palette,
   Languages,
@@ -16,7 +15,6 @@ import PageHeader from "../../components/common/PageHeader";
 import Profile from "./Profile";
 import Appearance from "./Appearance";
 import BlockedUsers from "./BlockedUsers";
-import PrivacySettings from "./PrivacySettings";
 import Language from "./Language";
 import useResponsive from "../../hooks/useResponsive";
 import { unsubscribeFromPushNotifications } from "../../utils/notifications";
@@ -68,14 +66,6 @@ const Settings = ({ isEmbedded = false }) => {
             path: "/settings/profile",
             description: "Manage your profile information",
             component: Profile,
-          },
-          {
-            id: "privacy",
-            icon: LockKeyhole,
-            label: "Privacy",
-            path: "/settings/privacy",
-            description: "Control your privacy settings",
-            component: PrivacySettings,
           },
           {
             id: "security",

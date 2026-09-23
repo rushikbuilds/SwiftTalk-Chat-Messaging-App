@@ -1,15 +1,9 @@
 import { fetchChatInfo, fetchChatMessages } from './chatService';
-import { loadSession, getSessionList } from './aiClient';
 
 export const chatKeys = {
   all: ['chats'],
   info: (chatId) => ['chat', 'info', chatId],
   messages: (chatId, userId) => ['chat', 'messages', chatId, userId],
-};
-
-export const aiKeys = {
-  session: (sessionId) => ['ai', 'session', sessionId],
-  sessionList: ['ai', 'sessions'],
 };
 
 export const chatInfoQueryOptions = (chatId) => ({
@@ -27,18 +21,3 @@ export const chatMessagesQueryOptions = (chatId, userId) => ({
   gcTime: 5 * 60_000,
   enabled: !!chatId && !!userId,
 });
-
-export const aiSessionQueryOptions = (sessionId) => ({
-  queryKey: aiKeys.session(sessionId),
-  queryFn: () => loadSession(sessionId),
-  staleTime: 30_000,
-  gcTime: 5 * 60_000,
-  enabled: !!sessionId,
-});
-
-export const aiSessionListQueryOptions = () => ({
-  queryKey: aiKeys.sessionList,
-  queryFn: () => getSessionList(),
-  staleTime: 30_000,
-  gcTime: 5 * 60_000,
-});

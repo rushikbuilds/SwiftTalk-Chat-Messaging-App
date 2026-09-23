@@ -14,13 +14,11 @@ import ForgotPassword from "./pages/auth/ForgotPassword";
 import ResetPassword from "./pages/auth/ResetPassword";
 import ChatHome from "./pages/chat/ChatHome";
 import ChatWindow from "./pages/chat/ChatWindow";
-import AIChatWindow from "./pages/chat/AIChatWindow";
 import Profile from "./pages/settings/Profile";
 import UserProfile from "./pages/settings/UserProfile";
 import Settings from "./pages/settings/Settings";
 import Appearance from "./pages/settings/Appearance";
 import BlockedUsers from "./pages/settings/BlockedUsers";
-import PrivacySettings from "./pages/settings/PrivacySettings";
 import Language from "./pages/settings/Language";
 import LandingPage from "./pages/LandingPage";
 import PrivacyPolicy from "./pages/Legal/PrivacyPolicy";
@@ -71,10 +69,6 @@ function App() {
                 element={hasToken ? <ChatWindow /> : <Navigate to="/login" />}
               />
               <Route
-                path="/ai-chat"
-                element={hasToken ? <AIChatWindow /> : <Navigate to="/login" />}
-              />
-              <Route
                 path="/user/:userId"
                 element={hasToken ? <UserProfile /> : <Navigate to="/login" />}
               />
@@ -93,12 +87,6 @@ function App() {
               <Route
                 path="/settings/blocked-users"
                 element={hasToken ? <BlockedUsers /> : <Navigate to="/login" />}
-              />
-              <Route
-                path="/settings/privacy"
-                element={
-                  hasToken ? <PrivacySettings /> : <Navigate to="/login" />
-                }
               />
               <Route
                 path="/settings/language"

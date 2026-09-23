@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback, useRef } from "react";
 import { Helmet } from "react-helmet-async";
 import { useNavigate, useLocation } from "react-router-dom";
 import { useQueryClient } from '@tanstack/react-query';
-import { chatInfoQueryOptions, chatMessagesQueryOptions, aiSessionQueryOptions, aiSessionListQueryOptions } from '../../utils/api/chatQueries';
+import { chatInfoQueryOptions, chatMessagesQueryOptions } from '../../utils/api/chatQueries';
 import {
   MessageCircle,
   X,
@@ -15,7 +15,6 @@ import {
   BellOff,
   Archive,
   Users,
-  Sparkles,
 } from "lucide-react";
 import SimpleBar from "simplebar-react";
 import "simplebar-react/dist/simplebar.min.css";
@@ -39,7 +38,6 @@ import {
   setSidebarWidth,
   SIDEBAR_CONFIG,
 } from "../../utils/storage";
-import { AI_ASSISTANT } from '../../utils/api/aiClient';
 import {
   fetchUserProfileById,
   fetchChatImage as fetchChatImageApi,
@@ -54,7 +52,6 @@ import {
   batchMarkChatsAsRead,
   batchPinChats,
 } from '../../utils/api';
-import AIChatWindow from './AIChatWindow';
 import "./ChatHome.css";
 
 const ChatHome = () => {
@@ -110,27 +107,6 @@ const ChatHome = () => {
   const chatContextMenu = useContextMenu();
   const newChatContextMenu = useContextMenu();
   const [selectedChatForMenu, setSelectedChatForMenu] = useState(null);
-  const [showAIChat, setShowAIChat] = useState(() => location.state?.showAIChat || false);
-
-  const [swifttalkAssistantEnabled, setSwifttalkAssistantEnabled] = useState(() => {
-    const stored = localStorage.getItem('swifttalk_assistant');
-    return stored === null ? true : stored === 'true';
-  });
-
-  useEffect(() => {
-    const handleStorageChange = () => {
-      const stored = localStorage.getItem('swifttalk_assistant');
-      setSwifttalkAssistantEnabled(stored === null ? true : stored === 'true');
-    };
-
-    window.addEventListener('storage', handleStorageChange);
-    window.addEventListener('swifttalk_assistant_changed', handleStorageChange);
-
-    return () => {
-      window.removeEventListener('storage', handleStorageChange);
-      window.removeEventListener('swifttalk_assistant_changed', handleStorageChange);
-    };
-  }, []);
 
 
   useEffect(() => {
@@ -237,20 +213,7 @@ const ChatHome = () => {
     });
   }, [chats, fetchChatImage, fetchUserProfile, userId]);
 
-  const aiChatItem = {
-    chat_id: 'ai-assistant',
-    chat_type: 'ai',
-    chat_name: AI_ASSISTANT.name,
-    isAI: true,
-    last_message: { preview_text: 'Ask me anything!' },
-    unread_count: 0,
-  };
-
-  const showAIAssistant = swifttalkAssistantEnabled && searchQuery.trim() === "";
-
-  const filteredChats = [
-    ...(showAIAssistant ? [aiChatItem] : []),
-    ...chats.filter((chat) => {
+  const filteredChats = chats.filter((chat) => {
       const q = searchQuery.trim().toLowerCase();
       if (!q) return true;
 
@@ -269,8 +232,7 @@ const ChatHome = () => {
         );
       }
       return false;
-    }),
-  ];
+    });
 
   useEffect(() => {
     if (!showOptionsMenu) return;
@@ -542,27 +504,15 @@ const ChatHome = () => {
 
   const handleChatClick = (chatOrId) => {
     const chat = typeof chatOrId === 'object' ? chatOrId : filteredChats.find(c => c.chat_id === chatOrId);
-    const isAI = chat?.isAI || chatOrId === 'ai-assistant';
 
     // Clear new private chat user when clicking on an existing chat
     setNewPrivateChatUser(null);
 
     if (typeof window !== "undefined" && window.innerWidth < 900) {
-      if (isAI) {
-        navigate('/ai-chat');
-      } else {
-        navigate(`/chat/${chat?.chat_id || chatOrId}`);
-        setShowAIChat(false);
-      }
+      navigate(`/chat/${chat?.chat_id || chatOrId}`);
     } else {
-      if (isAI) {
-        setShowAIChat(true);
-        setSelectedChatId(null);
-      } else {
-        handleMarkAsRead(chat?.chat_id || chatOrId);
-        setShowAIChat(false);
-        setSelectedChatId(chat?.chat_id || chatOrId);
-      }
+      handleMarkAsRead(chat?.chat_id || chatOrId);
+      setSelectedChatId(chat?.chat_id || chatOrId);
     }
   };
 
@@ -577,10 +527,8 @@ const ChatHome = () => {
   useEffect(() => {
     if (!isWideScreen && selectedChatId) {
       navigate(`/chat/${selectedChatId}`);
-    } else if (!isWideScreen && showAIChat) {
-      navigate('/ai-chat');
     }
-  }, [isWideScreen, selectedChatId, showAIChat, navigate]);
+  }, [isWideScreen, selectedChatId, navigate]);
 
 
 
@@ -1013,7 +961,7 @@ const ChatHome = () => {
 
 
     const handleMouseEnter = () => {
-      if (chat.isAI || chatSelection) return;
+      if (chatSelection) return;
       const chatId = chat.chat_id;
 
       // prefetchQuery respects staleTime — won't fire a duplicate request
@@ -1021,41 +969,6 @@ const ChatHome = () => {
       queryClient.prefetchQuery(chatInfoQueryOptions(chatId));
       queryClient.prefetchQuery(chatMessagesQueryOptions(chatId, userId));
     };
-
-
-    if (chat.isAI && swifttalkAssistantEnabled) {
-      const handleAIMouseEnter = () => {
-        const sessionId = localStorage.getItem('ai_session_id');
-        if (sessionId) {
-          queryClient.prefetchQuery(aiSessionQueryOptions(sessionId));
-        }
-        queryClient.prefetchQuery(aiSessionListQueryOptions());
-      };
-
-      return (
-        <div
-          key={chat.chat_id}
-          className={`chat-item ${showAIChat ? "selected" : ""}`}
-          onClick={() => handleChatClick(chat)}
-          onMouseEnter={handleAIMouseEnter}
-        >
-          <div className="chat-avatar ai-chat-avatar">
-            <Sparkles size={24} color="white" />
-          </div>
-          <div className="chat-info">
-            <div className="chat-header-info">
-              <h3 className="chat-name">{displayName}</h3>
-              <span className="ai-badge">AI</span>
-            </div>
-            <div className="chat-last-message">
-              <p className="last-message">
-                {chat.last_message?.preview_text || "Ask me anything!"}
-              </p>
-            </div>
-          </div>
-        </div>
-      );
-    }
 
     if (
       chat.chat_type === "private" &&
@@ -1318,12 +1231,7 @@ const ChatHome = () => {
           )}
 
           <div className="right-panel">
-            {showAIChat ? (
-              <AIChatWindow
-                isEmbedded={true}
-                onClose={() => setShowAIChat(false)}
-              />
-            ) : (selectedChatId || newPrivateChatUser) ? (
+            {(selectedChatId || newPrivateChatUser) ? (
               <ChatWindow
                 key={selectedChatId || `new-${newPrivateChatUser?.user_id}`}
                 chatId={selectedChatId}

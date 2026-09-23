@@ -31,7 +31,6 @@ model User {
   chatVisibility     ChatVisibility[]
   blockedUsers       BlockedUser[]   @relation("blockedUsers")
   blockedBy          BlockedUser[]   @relation("blockedByUsers")
-  aiSessions         AISession[]
   pushSubscription   PushSubscription?
 }
 
@@ -218,19 +217,4 @@ model BlockedUser {
   blockedUser User @relation("blockedByUsers", fields: [blocked_user_id], references: [user_id])
 
   @@id([user_id, blocked_user_id])
-}
-
-model AISession {
-  session_id    String    @id @default(uuid())
-  user_id       Int
-  title         String?   // "Chat with AI - Jan 21"
-  conversation  Json      // Store message history as JSON
-  created_at    DateTime  @default(now())
-  last_activity DateTime  @updatedAt
-  expires_at    DateTime  // For auto-cleanup
-  
-  user User @relation(fields: [user_id], references: [user_id], onDelete: Cascade)
-  
-  @@index([user_id, created_at])
-  @@index([expires_at])
 }
