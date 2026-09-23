@@ -37,17 +37,17 @@ SwiftTalk is a high-performance, real-time messaging platform built for scale. I
 ## 🏗️ Architecture & Services
 
 <p align="center">
-  <img src="assets/architecture.png" alt="SwiftTalk System Architecture" width="100%">
+  <img src="architecture.png" alt="SwiftTalk System Architecture" width="100%">
 </p>
 
-| Service | Port | Technology | Purpose |
-| :--- | :--- | :--- | :--- |
-| **Frontend Client** | `3000` | React 19, Vite | Responsive web application UI |
-| **REST API Server** | `3001` | Express, Prisma, Mongoose | Auth, users, chats, messages, AI, uploads |
-| **WebSocket Server** | `3002` | Socket.IO, Redis Adapter | Real-time messaging, presence, receipts |
-| **Redis** | `6379` | Redis 6.2 | Pub/Sub broker, presence, & message cache |
-| **MySQL Database** | `3306` | MySQL 8.0 (Prisma) | Users, credentials, sessions, OTPs, blocks |
-| **MongoDB Database** | `27017` | MongoDB 7.0 (Mongoose) | Chats, messages, attachments, receipts |
+| Service              | Port    | Technology                | Purpose                                    |
+| :------------------- | :------ | :------------------------ | :----------------------------------------- |
+| **Frontend Client**  | `3000`  | React 19, Vite            | Responsive web application UI              |
+| **REST API Server**  | `3001`  | Express, Prisma, Mongoose | Auth, users, chats, messages, AI, uploads  |
+| **WebSocket Server** | `3002`  | Socket.IO, Redis Adapter  | Real-time messaging, presence, receipts    |
+| **Redis**            | `6379`  | Redis 6.2                 | Pub/Sub broker, presence, & message cache  |
+| **MySQL Database**   | `3306`  | MySQL 8.0 (Prisma)        | Users, credentials, sessions, OTPs, blocks |
+| **MongoDB Database** | `27017` | MongoDB 7.0 (Mongoose)    | Chats, messages, attachments, receipts     |
 
 ---
 
@@ -99,15 +99,15 @@ npm start
 
 ## ⚙️ Key Scripts
 
-| Command | Working Directory | Description |
-| :--- | :--- | :--- |
-| `npm run dev` | `/server` | Runs API (`:3001`) and WS (`:3002`) concurrently |
-| `npm run dev:api` | `/server` | Runs REST API server only |
-| `npm run dev:ws` | `/server` | Runs WebSocket server only |
-| `npm run db:generate` | `/server` | Generates Prisma Client types |
-| `npm run db:push` | `/server` | Synchronizes MySQL schema with Prisma |
-| `npm start` | `/client` | Starts Vite development server (`:3000`) |
-| `npm run build` | `/client` | Builds frontend production bundle |
+| Command               | Working Directory | Description                                      |
+| :-------------------- | :---------------- | :----------------------------------------------- |
+| `npm run dev`         | `/server`         | Runs API (`:3001`) and WS (`:3002`) concurrently |
+| `npm run dev:api`     | `/server`         | Runs REST API server only                        |
+| `npm run dev:ws`      | `/server`         | Runs WebSocket server only                       |
+| `npm run db:generate` | `/server`         | Generates Prisma Client types                    |
+| `npm run db:push`     | `/server`         | Synchronizes MySQL schema with Prisma            |
+| `npm start`           | `/client`         | Starts Vite development server (`:3000`)         |
+| `npm run build`       | `/client`         | Builds frontend production bundle                |
 
 ---
 
