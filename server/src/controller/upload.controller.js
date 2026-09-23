@@ -2,38 +2,29 @@ const path = require('path');
 const fs = require('fs');
 const { PrismaClient } = require('@prisma/client');
 const prisma = new PrismaClient();
-const { upload } = require('../config/upload');
-const userCacheService = require('../services/user-cache.service');
+const { uploadProfile, uploadGroup, uploadFiles } = require('../config/upload');
+const Chat = require('../models/mongo/Chat');
+const Message = require('../models/mongo/Message');
 
 exports.uploadProfilePic = [
-  upload.single('profilePic'),
+  uploadProfile.single('profile_pic'),
   async (req, res) => {
     try {
-      if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
-      const userId = req.user.user_id;
+      if (!req.file) {
+        return res.status(400).json({ error: 'No file uploaded' });
+      }
+
       const fileUrl = `/uploads/${req.file.filename}`;
 
-      const updatedUser = await prisma.user.update({
-        where: { user_id: userId },
-        data: { profile_pic: fileUrl },
-        select: {
-          user_id: true,
-          username: true,
-          full_name: true,
-          email: true,
-          profile_pic: true,
-          status_message: true,
-          created_at: true
-        }
+      await prisma.user.update({
+        where: { user_id: req.user.user_id },
+        data: { profile_pic: fileUrl }
       });
-
-      // Invalidate Redis profile cache so fresh picture is immediately visible
-      await userCacheService.invalidateUserProfile(userId);
 
       res.status(200).json({
         message: 'Profile picture uploaded successfully',
-        profile_pic: fileUrl,
-        user: updatedUser
+        file_url: fileUrl,
+        filename: req.file.filename
       });
     } catch (error) {
       console.error('[upload.uploadProfilePic]', error);
@@ -43,27 +34,29 @@ exports.uploadProfilePic = [
 ];
 
 exports.uploadGroupImage = [
-  upload.fields([{ name: 'chat_image', maxCount: 1 }, { name: 'groupImage', maxCount: 1 }]),
+  uploadGroup.single('chat_image'),
   async (req, res) => {
     try {
-      const file = req.files?.chat_image?.[0] || req.files?.groupImage?.[0];
-      if (!file) return res.status(400).json({ error: 'No file uploaded. Use field name: chat_image or groupImage' });
+      if (!req.file) {
+        return res.status(400).json({ error: 'No file uploaded' });
+      }
 
+      const fileUrl = `/uploads/${req.file.filename}`;
       const { chatId } = req.body;
-      if (!chatId) return res.status(400).json({ error: 'chatId is required in request body' });
 
-      const chat = await prisma.chat.findUnique({ where: { chat_id: parseInt(chatId) } });
-      if (!chat) return res.status(404).json({ error: 'Chat not found' });
-      if (chat.chat_type !== 'group') return res.status(400).json({ error: 'Group image can only be set for group chats' });
+      if (chatId) {
+        const chat = await Chat.findByChatId(chatId);
+        if (chat) {
+          chat.chat_image = fileUrl;
+          await chat.save();
+        }
+      }
 
-      const adminRecord = await prisma.groupAdmin.findUnique({
-        where: { chat_id_user_id: { chat_id: parseInt(chatId), user_id: req.user.user_id } }
+      res.status(200).json({
+        message: 'Group image uploaded successfully',
+        file_url: fileUrl,
+        filename: req.file.filename
       });
-      if (!adminRecord) return res.status(403).json({ error: 'Only group admins can upload the group image' });
-
-      const fileUrl = `/uploads/${file.filename}`;
-      await prisma.chat.update({ where: { chat_id: parseInt(chatId) }, data: { chat_image: fileUrl } });
-      res.status(200).json({ message: 'Group image uploaded successfully', chat_image: fileUrl });
     } catch (error) {
       console.error('[upload.uploadGroupImage]', error);
       res.status(500).json({ error: 'Error uploading group image' });
@@ -72,10 +65,12 @@ exports.uploadGroupImage = [
 ];
 
 exports.uploadAttachment = [
-  upload.single('attachment'),
+  uploadFiles.single('attachment'),
   async (req, res) => {
     try {
-      if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
+      if (!req.file) {
+        return res.status(400).json({ error: 'No file uploaded' });
+      }
 
       res.status(200).json({
         message: 'Attachment uploaded successfully',
@@ -97,13 +92,13 @@ exports.getChatImage = async (req, res) => {
     const filePath = path.join(__dirname, '../../uploads', filename);
     if (!fs.existsSync(filePath)) return res.status(404).json({ error: 'File not found' });
 
-    const chat = await prisma.chat.findFirst({
-      where: { OR: [{ chat_image: `/uploads/${filename}` }, { chat_image: `uploads/${filename}` }, { chat_image: filename }] },
-      include: { members: { where: { user_id: req.user.user_id } } }
+    const chat = await Chat.findOne({
+      chat_image: { $regex: filename }
     });
 
     if (!chat) return res.status(404).json({ error: 'Chat image not found' });
-    if (chat.members.length === 0) return res.status(403).json({ error: 'Access denied. You are not a member of this chat.' });
+    const isMember = chat.members.some(m => m.user_id === req.user?.user_id);
+    if (!isMember) return res.status(403).json({ error: 'Access denied. You are not a member of this chat.' });
 
     res.sendFile(filePath);
   } catch (error) {
@@ -118,13 +113,16 @@ exports.getAttachment = async (req, res) => {
     const filePath = path.join(__dirname, '../../uploads', filename);
     if (!fs.existsSync(filePath)) return res.status(404).json({ error: 'File not found' });
 
-    const attachment = await prisma.attachment.findFirst({
-      where: { OR: [{ file_url: `/uploads/${filename}` }, { file_url: `uploads/${filename}` }, { file_url: filename }] },
-      include: { message: { include: { chat: { include: { members: { where: { user_id: req.user.user_id } } } } } } }
+    const message = await Message.findOne({
+      "attachments.file_url": { $regex: filename }
     });
 
-    if (!attachment) return res.status(404).json({ error: 'File not found in any accessible conversation' });
-    if (attachment.message.chat.members.length === 0) return res.status(403).json({ error: 'Access denied. You are not a member of this conversation.' });
+    if (!message) return res.status(404).json({ error: 'File not found in any accessible conversation' });
+
+    const chat = await Chat.findByChatId(message.chat_id);
+    if (!chat || !chat.members.some(m => m.user_id === req.user?.user_id)) {
+      return res.status(403).json({ error: 'Access denied. You are not a member of this conversation.' });
+    }
 
     res.sendFile(filePath);
   } catch (error) {
@@ -157,17 +155,21 @@ exports.getFile = async (req, res) => {
     });
     if (userWithProfilePic) return res.sendFile(filePath);
 
-    const chatWithImage = await prisma.chat.findFirst({
-      where: { OR: [{ chat_image: `/uploads/${filename}` }, { chat_image: `uploads/${filename}` }, { chat_image: filename }] }
+    const chatWithImage = await Chat.findOne({
+      chat_image: { $regex: filename }
     });
     if (chatWithImage) return res.sendFile(filePath);
 
     if (req.user) {
-      const attachment = await prisma.attachment.findFirst({
-        where: { OR: [{ file_url: `/uploads/${filename}` }, { file_url: `uploads/${filename}` }, { file_url: filename }] },
-        include: { message: { include: { chat: { include: { members: { where: { user_id: req.user.user_id } } } } } } }
+      const message = await Message.findOne({
+        "attachments.file_url": { $regex: filename }
       });
-      if (attachment && attachment.message.chat.members.length > 0) return res.sendFile(filePath);
+      if (message) {
+        const chat = await Chat.findByChatId(message.chat_id);
+        if (chat && chat.members.some(m => m.user_id === req.user.user_id)) {
+          return res.sendFile(filePath);
+        }
+      }
     }
 
     return res.status(404).json({ error: 'File not found' });

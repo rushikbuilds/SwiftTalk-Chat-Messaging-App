@@ -4,90 +4,106 @@ const path = require('path');
 const fs = require('fs');
 const messageCacheService = require('../services/message-cache.service');
 const { emitFileMessage } = require('../socket/socketHandler');
+const Chat = require('../models/mongo/Chat');
+const Message = require('../models/mongo/Message');
 
 exports.createMessage = async (req, res) => {
   try {
-    const { chat_id, sender_id, message_text, message_type = 'text' } = req.body;
+    const { chat_id, sender_id, message_text, message_type = 'text', reply_to_id, referenced_message_id } = req.body;
     if (!chat_id || !sender_id) return res.status(400).json({ error: 'chat_id and sender_id are required' });
     if (!message_text || message_text.trim() === '') {
       return res.status(400).json({ error: 'message_text is required and cannot be empty' });
     }
 
-    const chatMember = await prisma.chatMember.findUnique({
-      where: {
-        chat_id_user_id: {
-          chat_id: parseInt(chat_id),
-          user_id: parseInt(sender_id)
-        }
+    const chatIdStr = String(chat_id);
+    const senderIdInt = parseInt(sender_id);
+
+    const chat = await Chat.findByChatId(chatIdStr);
+    if (!chat) return res.status(404).json({ error: 'Chat not found' });
+
+    const isMember = chat.members.some(m => m.user_id === senderIdInt);
+    if (!isMember) return res.status(403).json({ error: 'User is not a member of this chat' });
+
+    const senderUser = await prisma.user.findUnique({
+      where: { user_id: senderIdInt },
+      select: { user_id: true, username: true, full_name: true, profile_pic: true }
+    });
+
+    let referencedMessage = null;
+    const targetReplyId = reply_to_id || referenced_message_id;
+    if (targetReplyId) {
+      const refMsg = await Message.findByMessageId(targetReplyId);
+      if (refMsg && String(refMsg.chat_id) === String(chat.chat_id)) {
+        referencedMessage = {
+          message_id: String(refMsg.message_id || refMsg._id),
+          message_text: refMsg.message_text,
+          is_reply: true,
+          sender: refMsg.sender ? {
+            user_id: refMsg.sender.user_id,
+            username: refMsg.sender.username,
+            full_name: refMsg.sender.full_name
+          } : null
+        };
       }
-    });
+    }
 
-    if (!chatMember) return res.status(403).json({ error: 'User is not a member of this chat' });
-
-    const message = await prisma.message.create({
-      data: {
-        chat_id: parseInt(chat_id),
-        sender_id: parseInt(sender_id),
-        message_text: message_text.trim(),
-        message_type: message_type
-      }
-    });
-
-    await prisma.chatVisibility.updateMany({
-      where: { chat_id: parseInt(chat_id), is_visible: false, is_archived: false },
-      data: { is_visible: true, hidden_at: null }
-    });
-
-    const chatMembers = await prisma.chatMember.findMany({ where: { chat_id: parseInt(chat_id) }, select: { user_id: true } });
-
-    const statusData = chatMembers.map(member => ({
-      message_id: message.message_id,
+    const statusData = chat.members.map(member => ({
       user_id: member.user_id,
-      status: member.user_id === parseInt(sender_id) ? 'sent' : 'delivered'
+      status: member.user_id === senderIdInt ? 'sent' : 'delivered'
     }));
 
-    await prisma.messageStatus.createMany({
-      data: statusData
-    });
-
-    const visibilityData = chatMembers.map(member => ({
-      message_id: message.message_id,
+    const visibilityData = chat.members.map(member => ({
       user_id: member.user_id,
       is_visible: true
     }));
 
-    await prisma.messageVisibility.createMany({
-      data: visibilityData
+    const messageDoc = new Message({
+      chat_id: chat.chat_id,
+      sender_id: senderIdInt,
+      sender: senderUser ? {
+        user_id: senderUser.user_id,
+        username: senderUser.username,
+        full_name: senderUser.full_name,
+        profile_pic: senderUser.profile_pic
+      } : null,
+      message_text: message_text.trim(),
+      message_type,
+      is_reply: !!targetReplyId,
+      referenced_message_id: targetReplyId ? String(targetReplyId) : null,
+      referenced_message: referencedMessage,
+      attachments: [],
+      status: statusData,
+      visibility: visibilityData,
+      deleted_for: []
     });
 
-    const completeMessage = await prisma.message.findUnique({
-      where: { message_id: message.message_id },
-      include: {
-        sender: {
-          select: {
-            user_id: true,
-            username: true,
-            full_name: true,
-            profile_pic: true
-          }
-        },
-        chat: {
-          select: {
-            chat_id: true,
-            chat_name: true,
-            chat_type: true
-          }
-        },
-        status: {
-          select: {
-            user_id: true,
-            status: true,
-            updated_at: true
-          }
+    await messageDoc.save();
+
+    // Update Chat last_message and unhide chat for members
+    await Chat.updateOne(
+      { chat_id: chat.chat_id },
+      {
+        $set: {
+          last_message: {
+            message_id: messageDoc.message_id,
+            sender_id: senderIdInt,
+            message_text: messageDoc.message_text,
+            message_type: messageDoc.message_type,
+            created_at: messageDoc.created_at
+          },
+          updated_at: messageDoc.created_at,
+          "members.$[elem].is_visible": true,
+          "members.$[elem].hidden_at": null
         }
+      },
+      {
+        arrayFilters: [{ "elem.is_archived": false }]
       }
-    });
+    );
 
+    const completeMessage = messageDoc.toObject();
+    completeMessage.reply_to_id = completeMessage.referenced_message_id;
+    completeMessage.reply_to_message = completeMessage.referenced_message;
     res.status(201).json({ message: 'Message sent successfully', data: completeMessage });
   } catch (error) {
     console.error('[message.createMessage]', error);
@@ -99,108 +115,98 @@ exports.uploadFileAndCreateMessage = async (req, res) => {
   try {
     if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
     const { chat_id, sender_id, message_text } = req.body;
+    const chatIdStr = String(chat_id);
+    const senderIdInt = parseInt(sender_id);
 
-    const chatMember = await prisma.chatMember.findUnique({
-      where: {
-        chat_id_user_id: {
-          chat_id: parseInt(chat_id),
-          user_id: parseInt(sender_id)
-        }
-      }
-    });
+    const chat = await Chat.findByChatId(chatIdStr);
+    if (!chat) {
+      if (req.file.path) fs.unlinkSync(req.file.path);
+      return res.status(404).json({ error: 'Chat not found' });
+    }
 
-    if (!chatMember) {
-      fs.unlinkSync(req.file.path);
+    const isMember = chat.members.some(m => m.user_id === senderIdInt);
+    if (!isMember) {
+      if (req.file.path) fs.unlinkSync(req.file.path);
       return res.status(403).json({ error: 'User is not a member of this chat' });
     }
 
     let messageType = 'file';
-    if (req.file.mimetype.startsWith('image/')) {
-      messageType = 'image';
-    } else if (req.file.mimetype.startsWith('video/')) {
-      messageType = 'video';
-    } else if (req.file.mimetype.startsWith('audio/')) {
-      messageType = 'audio';
-    } else if (req.file.mimetype.includes('pdf')) messageType = 'document';
+    if (req.file.mimetype.startsWith('image/')) messageType = 'image';
+    else if (req.file.mimetype.startsWith('video/')) messageType = 'video';
+    else if (req.file.mimetype.startsWith('audio/')) messageType = 'audio';
+    else if (req.file.mimetype.includes('pdf')) messageType = 'document';
 
-    const message = await prisma.message.create({
-      data: {
-        chat_id: parseInt(chat_id),
-        sender_id: parseInt(sender_id),
-        message_text: message_text || req.file.originalname,
-        message_type: messageType
-      }
-    });
-
-    await prisma.chatVisibility.updateMany({
-      where: { chat_id: parseInt(chat_id), is_visible: false, is_archived: false },
-      data: { is_visible: true, hidden_at: null }
+    const senderUser = await prisma.user.findUnique({
+      where: { user_id: senderIdInt },
+      select: { user_id: true, username: true, full_name: true, profile_pic: true }
     });
 
     const fileUrl = `/uploads/${req.file.filename}`;
-    const attachment = await prisma.attachment.create({
-      data: {
-        message_id: message.message_id,
-        file_url: fileUrl,
-        original_filename: req.file.originalname,
-        file_type: req.file.mimetype,
-        file_size: req.file.size
-      }
-    });
+    const attachment = {
+      file_url: fileUrl,
+      original_filename: req.file.originalname,
+      file_type: req.file.mimetype,
+      file_size: req.file.size
+    };
 
-    const chatMembers = await prisma.chatMember.findMany({
-      where: { chat_id: parseInt(chat_id) },
-      select: { user_id: true }
-    });
-
-    const statusData = chatMembers.map(member => ({
-      message_id: message.message_id,
+    const statusData = chat.members.map(member => ({
       user_id: member.user_id,
-      status: member.user_id === parseInt(sender_id) ? 'sent' : 'delivered'
+      status: member.user_id === senderIdInt ? 'sent' : 'delivered'
     }));
 
-    await prisma.messageStatus.createMany({
-      data: statusData
+    const messageDoc = new Message({
+      chat_id: chat.chat_id,
+      sender_id: senderIdInt,
+      sender: senderUser ? {
+        user_id: senderUser.user_id,
+        username: senderUser.username,
+        full_name: senderUser.full_name,
+        profile_pic: senderUser.profile_pic
+      } : null,
+      message_text: message_text || req.file.originalname,
+      message_type: messageType,
+      attachments: [attachment],
+      status: statusData,
+      visibility: chat.members.map(m => ({ user_id: m.user_id, is_visible: true })),
+      deleted_for: []
     });
 
-    const visibilityData = chatMembers.map(member => ({
-      message_id: message.message_id,
-      user_id: member.user_id,
-      is_visible: true
-    }));
+    await messageDoc.save();
 
-    await prisma.messageVisibility.createMany({
-      data: visibilityData
-    });
-
-    const completeMessage = await prisma.message.findUnique({
-      where: { message_id: message.message_id },
-      include: {
-        sender: {
-          select: {
-            user_id: true,
-            username: true,
-            full_name: true,
-            profile_pic: true
-          }
-        },
-        chat: {
-          select: {
-            chat_id: true,
-            chat_name: true,
-            chat_type: true
-          }
-        },
-        attachments: true
+    await Chat.updateOne(
+      { chat_id: chat.chat_id },
+      {
+        $set: {
+          last_message: {
+            message_id: messageDoc.message_id,
+            sender_id: senderIdInt,
+            message_text: messageDoc.message_text,
+            message_type: messageDoc.message_type,
+            created_at: messageDoc.created_at
+          },
+          updated_at: messageDoc.created_at,
+          "members.$[elem].is_visible": true,
+          "members.$[elem].hidden_at": null
+        }
+      },
+      {
+        arrayFilters: [{ "elem.is_archived": false }]
       }
-    });
+    );
 
-    emitFileMessage(chat_id, completeMessage);
+    const completeMessage = messageDoc.toObject();
+    completeMessage.chat = {
+      chat_id: chat.chat_id,
+      chat_name: chat.chat_name,
+      chat_type: chat.chat_type
+    };
+
+    emitFileMessage(chat.chat_id, completeMessage);
 
     res.status(201).json(completeMessage);
   } catch (err) {
     if (req.file && req.file.path) {
-      try { fs.unlinkSync(req.file.path); } catch (unlinkErr) {}
+      try { fs.unlinkSync(req.file.path); } catch (unlinkErr) { }
     }
     console.error('[message.uploadFileAndCreateMessage]', err);
     res.status(500).json({ error: err.message });
@@ -216,143 +222,88 @@ exports.forwardMessage = async (req, res) => {
     }
     if (!sender_id) return res.status(400).json({ error: 'sender_id is required' });
 
-    const originalMessage = await prisma.message.findUnique({
-      where: { message_id: parseInt(message_id) },
-      include: {
-        attachments: true,
-        sender: {
-          select: {
-            user_id: true,
-            username: true,
-            full_name: true
-          }
-        }
-      }
-    });
-
+    const senderIdInt = parseInt(sender_id);
+    const originalMessage = await Message.findByMessageId(message_id);
     if (!originalMessage) return res.status(404).json({ error: 'Original message not found' });
 
-    const chatMemberships = await prisma.chatMember.findMany({
-      where: {
-        user_id: parseInt(sender_id),
-        chat_id: { in: chat_ids.map(id => parseInt(id)) }
-      },
-      select: { chat_id: true }
+    const senderUser = await prisma.user.findUnique({
+      where: { user_id: senderIdInt },
+      select: { user_id: true, username: true, full_name: true, profile_pic: true }
     });
-
-    const memberChatIds = chatMemberships.map(m => m.chat_id);
-    const unauthorizedChats = chat_ids.filter(id => !memberChatIds.includes(parseInt(id)));
-
-    if (unauthorizedChats.length > 0) {
-      return res.status(403).json({ 
-        error: 'User is not a member of some target chats',
-        unauthorizedChats 
-      });
-    }
 
     const forwardedMessages = [];
     const errors = [];
 
-    for (const chatId of chat_ids) {
+    for (const targetChatId of chat_ids) {
       try {
-        const targetChatId = parseInt(chatId);
-
-        const forwardedMessage = await prisma.message.create({
-          data: {
-            chat_id: targetChatId,
-            sender_id: parseInt(sender_id),
-            message_text: originalMessage.message_text || '',
-            message_type: originalMessage.message_type,
-            is_forward: true,
-            referenced_message_id: originalMessage.message_id
-          }
-        });
-
-        if (originalMessage.attachments && originalMessage.attachments.length > 0) {
-          const attachmentData = originalMessage.attachments.map(att => ({
-            message_id: forwardedMessage.message_id,
-            file_url: att.file_url,
-            original_filename: att.original_filename,
-            file_type: att.file_type,
-            file_size: att.file_size
-          }));
-
-          await prisma.attachment.createMany({
-            data: attachmentData
-          });
+        const chat = await Chat.findByChatId(targetChatId);
+        if (!chat) {
+          errors.push({ chat_id: targetChatId, error: 'Chat not found' });
+          continue;
         }
 
-        await prisma.chatVisibility.updateMany({
-          where: {
-            chat_id: targetChatId,
-            is_visible: false,
-            is_archived: false
-          },
-          data: {
-            is_visible: true,
-            hidden_at: null
-          }
-        });
+        const isMember = chat.members.some(m => m.user_id === senderIdInt);
+        if (!isMember) {
+          errors.push({ chat_id: targetChatId, error: 'User is not a member of this chat' });
+          continue;
+        }
 
-        const chatMembers = await prisma.chatMember.findMany({
-          where: { chat_id: targetChatId },
-          select: { user_id: true }
-        });
-
-        const statusData = chatMembers.map(member => ({
-          message_id: forwardedMessage.message_id,
+        const statusData = chat.members.map(member => ({
           user_id: member.user_id,
-          status: member.user_id === parseInt(sender_id) ? 'sent' : 'delivered'
+          status: member.user_id === senderIdInt ? 'sent' : 'delivered'
         }));
 
-        await prisma.messageStatus.createMany({
-          data: statusData
+        const forwardedMsgDoc = new Message({
+          chat_id: chat.chat_id,
+          sender_id: senderIdInt,
+          sender: senderUser ? {
+            user_id: senderUser.user_id,
+            username: senderUser.username,
+            full_name: senderUser.full_name,
+            profile_pic: senderUser.profile_pic
+          } : null,
+          message_text: originalMessage.message_text || '',
+          message_type: originalMessage.message_type,
+          is_forward: true,
+          referenced_message_id: originalMessage.message_id,
+          attachments: originalMessage.attachments || [],
+          status: statusData,
+          visibility: chat.members.map(m => ({ user_id: m.user_id, is_visible: true })),
+          deleted_for: []
         });
 
-        const visibilityData = chatMembers.map(member => ({
-          message_id: forwardedMessage.message_id,
-          user_id: member.user_id,
-          is_visible: true
-        }));
+        await forwardedMsgDoc.save();
 
-        await prisma.messageVisibility.createMany({
-          data: visibilityData
-        });
-
-        const completeMessage = await prisma.message.findUnique({
-          where: { message_id: forwardedMessage.message_id },
-          include: {
-            sender: {
-              select: {
-                user_id: true,
-                username: true,
-                full_name: true,
-                profile_pic: true
-              }
-            },
-            chat: {
-              select: {
-                chat_id: true,
-                chat_name: true,
-                chat_type: true
-              }
-            },
-            attachments: true,
-            status: {
-              select: {
-                user_id: true,
-                status: true,
-                updated_at: true
-              }
+        await Chat.updateOne(
+          { chat_id: chat.chat_id },
+          {
+            $set: {
+              last_message: {
+                message_id: forwardedMsgDoc.message_id,
+                sender_id: senderIdInt,
+                message_text: forwardedMsgDoc.message_text,
+                message_type: forwardedMsgDoc.message_type,
+                created_at: forwardedMsgDoc.created_at
+              },
+              updated_at: forwardedMsgDoc.created_at,
+              "members.$[elem].is_visible": true,
+              "members.$[elem].hidden_at": null
             }
-          }
-        });
+          },
+          { arrayFilters: [{ "elem.is_archived": false }] }
+        );
 
-        emitFileMessage(targetChatId, completeMessage);
+        const completeMessage = forwardedMsgDoc.toObject();
+        completeMessage.chat = {
+          chat_id: chat.chat_id,
+          chat_name: chat.chat_name,
+          chat_type: chat.chat_type
+        };
 
+        emitFileMessage(chat.chat_id, completeMessage);
         forwardedMessages.push(completeMessage);
       } catch (chatError) {
-        errors.push({ chat_id: chatId, error: chatError.message });
+        errors.push({ chat_id: targetChatId, error: chatError.message });
       }
     }
 
@@ -367,71 +318,42 @@ exports.forwardMessage = async (req, res) => {
   }
 };
 
-
-
 exports.getMessagesByChat = async (req, res) => {
   try {
-    const chatId = parseInt(req.params.chatId);
-    const userId = parseInt(req.query.userId);
+    const { chatId } = req.params;
+    const userId = parseInt(req.query.userId || req.user?.user_id);
     const page = parseInt(req.query.page) || 1;
     const limit = parseInt(req.query.limit) || 50;
     const skip = (page - 1) * limit;
 
-    if (isNaN(chatId)) return res.status(400).json({ error: 'Invalid chat_id' });
-    if (isNaN(userId)) return res.status(400).json({ error: 'Invalid user_id' });
+    const chat = await Chat.findByChatId(chatId);
+    if (!chat) return res.status(404).json({ error: 'Chat not found' });
 
-    const chatMember = await prisma.chatMember.findUnique({
-      where: { chat_id_user_id: { chat_id: chatId, user_id: userId } }
-    });
-    if (!chatMember) return res.status(403).json({ error: 'User is not a member of this chat' });
+    const isMember = chat.members.some(m => m.user_id === userId);
+    if (!isMember) return res.status(403).json({ error: 'User is not a member of this chat' });
+
+    const filter = {
+      chat_id: chat.chat_id,
+      deleted_for: { $ne: userId }
+    };
 
     const [messages, totalCount] = await Promise.all([
-      prisma.message.findMany({
-        where: { 
-          chat_id: chatId,
-          visibility: {
-            some: {
-              user_id: userId,
-              is_visible: true
-            }
-          }
-        },
-        include: {
-          sender: {
-            select: {
-              user_id: true,
-              username: true,
-              full_name: true,
-              profile_pic: true
-            }
-          },
-          status: true,
-          attachments: {
-            select: {
-              attachment_id: true,
-              file_url: true,
-              original_filename: true,
-              file_type: true,
-              file_size: true
-            }
-          },
-          visibility: {
-            select: {
-              user_id: true,
-              is_visible: true,
-              hidden_at: true
-            }
-          },
-        },
-        orderBy: { created_at: 'desc' },
-        skip: skip,
-        take: limit
-      }),
-      prisma.message.count({ where: { chat_id: chatId } })
+      Message.find(filter)
+        .sort({ created_at: -1 })
+        .skip(skip)
+        .limit(limit),
+      Message.countDocuments(filter)
     ]);
 
+    const formattedMessages = messages.map(m => {
+      const obj = m.toObject();
+      obj.reply_to_id = obj.referenced_message_id;
+      obj.reply_to_message = obj.referenced_message;
+      return obj;
+    }).reverse();
+
     res.json({
-      messages: messages.reverse(),
+      messages: formattedMessages,
       pagination: {
         currentPage: page,
         totalPages: Math.ceil(totalCount / limit),
@@ -448,42 +370,33 @@ exports.getMessagesByChat = async (req, res) => {
 
 exports.deleteMessageForUser = async (req, res) => {
   try {
-    const messageId = parseInt(req.params.id);
-    const userId = parseInt(req.body.user_id || req.user.user_id);
+    const { id } = req.params;
+    const userId = parseInt(req.body.user_id || req.user?.user_id);
 
-    if (isNaN(messageId) || isNaN(userId)) {
-      return res.status(400).json({ error: 'Invalid message_id or user_id' });
+    if (isNaN(userId)) {
+      return res.status(400).json({ error: 'Invalid user_id' });
     }
 
-    const message = await prisma.message.findUnique({
-      where: { message_id: messageId },
-      select: { message_id: true, chat_id: true, sender_id: true }
-    });
+    const message = await Message.findByMessageId(id);
     if (!message) return res.status(404).json({ error: 'Message not found' });
 
-    const isUserInChat = await prisma.chatMember.findUnique({
-      where: { chat_id_user_id: { chat_id: message.chat_id, user_id: userId } }
+    const chat = await Chat.findByChatId(message.chat_id);
+    if (!chat) return res.status(404).json({ error: 'Chat not found' });
+
+    const isMember = chat.members.some(m => m.user_id === userId);
+    if (!isMember) return res.status(403).json({ error: 'User is not a member of this chat' });
+
+    await Message.updateOne(
+      { message_id: message.message_id },
+      { $addToSet: { deleted_for: userId } }
+    );
+
+    res.json({
+      message: 'Message deleted for user',
+      messageId: message.message_id,
+      userId,
+      removedFromDb: false
     });
-    if (!isUserInChat) return res.status(403).json({ error: 'User is not a member of this chat' });
-
-    const updatedVisibility = await prisma.messageVisibility.update({
-      where: { message_id_user_id: { message_id: messageId, user_id: userId } },
-      data: { is_visible: false, hidden_at: new Date() }
-    });
-    if (!updatedVisibility) return res.status(500).json({ error: 'Failed to delete message for user' });
-
-    const visibleCount = await prisma.messageVisibility.count({ where: { message_id: messageId, is_visible: true } });
-
-    if (visibleCount === 0) {
-      await prisma.attachment.deleteMany({ where: { message_id: messageId } });
-      await prisma.messageStatus.deleteMany({ where: { message_id: messageId } });
-      await prisma.messageVisibility.deleteMany({ where: { message_id: messageId } });
-      await prisma.message.delete({ where: { message_id: messageId } });
-      return res.json({ message: 'Message deleted for user and removed from database', messageId, userId, removedFromDb: true });
-    }
-
-    res.json({ message: 'Message deleted for user', messageId, userId, removedFromDb: false });
-
   } catch (err) {
     console.error('[message.deleteMessageForUser]', err);
     res.status(500).json({ error: err.message });
@@ -492,20 +405,32 @@ exports.deleteMessageForUser = async (req, res) => {
 
 exports.markAllMessagesAsRead = async (req, res) => {
   try {
-    const chatId = parseInt(req.params.chatId);
-    const userId = parseInt(req.params.userId);
+    const { chatId, userId } = req.params;
+    const userIdInt = parseInt(userId);
 
-    const messages = await prisma.message.findMany({ where: { chat_id: chatId }, select: { message_id: true } });
-    const messageIds = messages.map(msg => msg.message_id);
+    const chat = await Chat.findByChatId(chatId);
+    if (!chat) return res.status(404).json({ error: 'Chat not found' });
 
-    const result = await prisma.messageStatus.updateMany({
-      where: { message_id: { in: messageIds }, user_id: userId, status: { not: 'read' } },
-      data: { status: 'read', updated_at: new Date() }
-    });
+    const result = await Message.updateMany(
+      {
+        chat_id: chat.chat_id,
+        "status.user_id": userIdInt,
+        "status.status": { $ne: 'read' }
+      },
+      {
+        $set: {
+          "status.$[elem].status": "read",
+          "status.$[elem].updated_at": new Date()
+        }
+      },
+      {
+        arrayFilters: [{ "elem.user_id": userIdInt }]
+      }
+    );
 
-    res.json({ 
-      message: `Marked ${result.count} messages as read`,
-      count: result.count
+    res.json({
+      message: `Marked ${result.modifiedCount} messages as read`,
+      count: result.modifiedCount
     });
   } catch (err) {
     console.error('[message.markAllMessagesAsRead]', err);
@@ -515,7 +440,7 @@ exports.markAllMessagesAsRead = async (req, res) => {
 
 exports.deleteBatchMessagesForUser = async (req, res) => {
   try {
-    const userId = parseInt(req.body.user_id || req.user.user_id);
+    const userId = parseInt(req.body.user_id || req.user?.user_id);
     const { message_ids } = req.body;
 
     if (!Array.isArray(message_ids) || message_ids.length === 0) {
@@ -523,42 +448,18 @@ exports.deleteBatchMessagesForUser = async (req, res) => {
     }
     if (isNaN(userId)) return res.status(400).json({ error: 'Invalid user_id' });
 
-    const messageIds = message_ids.map(id => parseInt(id)).filter(id => !isNaN(id));
-    if (messageIds.length === 0) return res.status(400).json({ error: 'No valid message IDs provided' });
+    const stringMessageIds = message_ids.map(id => String(id));
 
-    const messages = await prisma.message.findMany({ where: { message_id: { in: messageIds } }, select: { message_id: true, chat_id: true } });
-    if (messages.length === 0) return res.status(404).json({ error: 'No messages found' });
+    const result = await Message.updateMany(
+      { message_id: { $in: stringMessageIds } },
+      { $addToSet: { deleted_for: userId } }
+    );
 
-    const chatIds = [...new Set(messages.map(m => m.chat_id))];
-    const userMemberships = await prisma.chatMember.findMany({ where: { user_id: userId, chat_id: { in: chatIds } }, select: { chat_id: true } });
-    const userChatIds = new Set(userMemberships.map(m => m.chat_id));
-    const validMessages = messages.filter(m => userChatIds.has(m.chat_id));
-
-    if (validMessages.length === 0) {
-      return res.status(403).json({ error: 'User is not a member of any of the chats containing these messages' });
-    }
-
-    const validMessageIds = validMessages.map(m => m.message_id);
-
-    const updateResult = await prisma.messageVisibility.updateMany({
-      where: { message_id: { in: validMessageIds }, user_id: userId },
-      data: { is_visible: false, hidden_at: new Date() }
+    res.json({
+      message: 'Messages deleted for user',
+      deleted_count: result.modifiedCount,
+      userId
     });
-
-    const messagesToDelete = [];
-    for (const messageId of validMessageIds) {
-      const visibleCount = await prisma.messageVisibility.count({ where: { message_id: messageId, is_visible: true } });
-      if (visibleCount === 0) messagesToDelete.push(messageId);
-    }
-
-    if (messagesToDelete.length > 0) {
-      await prisma.attachment.deleteMany({ where: { message_id: { in: messagesToDelete } } });
-      await prisma.messageStatus.deleteMany({ where: { message_id: { in: messagesToDelete } } });
-      await prisma.messageVisibility.deleteMany({ where: { message_id: { in: messagesToDelete } } });
-      await prisma.message.deleteMany({ where: { message_id: { in: messagesToDelete } } });
-    }
-
-    res.json({ message: `${updateResult.count} messages deleted for user`, deletedCount: updateResult.count, removedFromDb: messagesToDelete.length, userId });
   } catch (err) {
     console.error('[message.deleteBatchMessagesForUser]', err);
     res.status(500).json({ error: err.message });
@@ -567,42 +468,30 @@ exports.deleteBatchMessagesForUser = async (req, res) => {
 
 exports.deleteAllMessagesInChatForUser = async (req, res) => {
   try {
-    const chatId = parseInt(req.params.chatId);
-    const userId = parseInt(req.body.user_id || req.user.user_id);
+    const { chatId } = req.params;
+    const userId = parseInt(req.body.user_id || req.user?.user_id);
 
-    if (isNaN(chatId) || isNaN(userId)) return res.status(400).json({ error: 'Invalid chat_id or user_id' });
+    if (isNaN(userId)) return res.status(400).json({ error: 'Invalid user_id' });
 
-    const chatMember = await prisma.chatMember.findUnique({
-      where: { chat_id_user_id: { chat_id: chatId, user_id: userId } }
+    const chat = await Chat.findByChatId(chatId);
+    if (!chat) return res.status(404).json({ error: 'Chat not found' });
+
+    const isMember = chat.members.some(m => m.user_id === userId);
+    if (!isMember) return res.status(403).json({ error: 'User is not a member of this chat' });
+
+    const result = await Message.updateMany(
+      { chat_id: chat.chat_id },
+      { $addToSet: { deleted_for: userId } }
+    );
+
+    await messageCacheService.invalidateUserChatCache(chat.chat_id, userId);
+
+    res.json({
+      message: 'All messages in chat deleted for user',
+      chatId: chat.chat_id,
+      deleted_count: result.modifiedCount,
+      userId
     });
-    if (!chatMember) return res.status(403).json({ error: 'User is not a member of this chat' });
-
-    const messages = await prisma.message.findMany({ where: { chat_id: chatId }, select: { message_id: true } });
-    if (messages.length === 0) {
-      return res.json({ message: 'No messages to delete in this chat', deletedCount: 0, removedFromDb: 0, userId, chatId });
-    }
-
-    const messageIds = messages.map(m => m.message_id);
-
-    const updateResult = await prisma.messageVisibility.updateMany({
-      where: { message_id: { in: messageIds }, user_id: userId },
-      data: { is_visible: false, hidden_at: new Date() }
-    });
-
-    const messagesToDelete = [];
-    for (const messageId of messageIds) {
-      const visibleCount = await prisma.messageVisibility.count({ where: { message_id: messageId, is_visible: true } });
-      if (visibleCount === 0) messagesToDelete.push(messageId);
-    }
-
-    if (messagesToDelete.length > 0) {
-      await prisma.attachment.deleteMany({ where: { message_id: { in: messagesToDelete } } });
-      await prisma.messageStatus.deleteMany({ where: { message_id: { in: messagesToDelete } } });
-      await prisma.messageVisibility.deleteMany({ where: { message_id: { in: messagesToDelete } } });
-      await prisma.message.deleteMany({ where: { message_id: { in: messagesToDelete } } });
-    }
-
-    res.json({ message: 'All messages in chat cleared for user', deletedCount: updateResult.count, removedFromDb: messagesToDelete.length, userId, chatId });
   } catch (err) {
     console.error('[message.deleteAllMessagesInChatForUser]', err);
     res.status(500).json({ error: err.message });

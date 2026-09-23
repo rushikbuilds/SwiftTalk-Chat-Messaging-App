@@ -66,10 +66,8 @@ class SocketService {
   // Join a chat room
   joinChat(chatId) {
     if (this.socket && this.isConnected) {
-      // Ensure chatId is a number
-      const numericChatId =
-        typeof chatId === "string" ? parseInt(chatId, 10) : chatId;
-      this.socket.emit("join_chat", { chatId: numericChatId });
+      const normalizedChatId = chatId != null ? String(chatId) : chatId;
+      this.socket.emit("join_chat", { chat_id: normalizedChatId, chatId: normalizedChatId });
     } else {
       console.warn("⚠️ Cannot join chat - socket not connected");
     }
@@ -78,22 +76,17 @@ class SocketService {
   // Leave a chat room
   leaveChat(chatId) {
     if (this.socket && this.isConnected) {
-      const numericChatId =
-        typeof chatId === "string" ? parseInt(chatId, 10) : chatId;
-      this.socket.emit("leave_chat", { chatId: numericChatId });
+      const normalizedChatId = chatId != null ? String(chatId) : chatId;
+      this.socket.emit("leave_chat", { chat_id: normalizedChatId, chatId: normalizedChatId });
     }
   }
 
   // Send a text message
   sendMessage(messageData) {
     if (this.socket && this.isConnected) {
-      // Ensure chat_id is a number
       const dataToSend = {
         ...messageData,
-        chat_id:
-          typeof messageData.chat_id === "string"
-            ? parseInt(messageData.chat_id, 10)
-            : messageData.chat_id,
+        chat_id: messageData.chat_id != null ? String(messageData.chat_id) : messageData.chat_id,
         tempId: messageData.tempId, // Ensure tempId is always passed
       };
 

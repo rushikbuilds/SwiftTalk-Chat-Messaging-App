@@ -315,7 +315,7 @@ const ChatHome = () => {
           let unreadCount = prevChats[chatIndex].unread_count || 0;
           if (
             message.sender_id !== userId &&
-            parseInt(selectedChatId) !== parseInt(message.chat_id)
+            String(selectedChatId) !== String(message.chat_id)
           ) {
             unreadCount += 1;
           }
@@ -484,9 +484,9 @@ const ChatHome = () => {
     };
 
     const handleRemovedFromGroup = ({ chat_id, group_name, message }) => {
-      setChats((prevChats) => prevChats.filter((c) => c.chat_id !== chat_id));
+      setChats((prevChats) => prevChats.filter((c) => String(c.chat_id) !== String(chat_id)));
 
-      if (parseInt(selectedChatId) === parseInt(chat_id)) {
+      if (selectedChatId != null && String(selectedChatId) === String(chat_id)) {
         setSelectedChatId(null);
       }
 
@@ -559,7 +559,7 @@ const ChatHome = () => {
         setShowAIChat(true);
         setSelectedChatId(null);
       } else {
-        handleMarkAsRead(parseInt(chat?.chat_id || chatOrId));
+        handleMarkAsRead(chat?.chat_id || chatOrId);
         setShowAIChat(false);
         setSelectedChatId(chat?.chat_id || chatOrId);
       }
@@ -568,7 +568,7 @@ const ChatHome = () => {
 
   useEffect(() => {
     const path = location.pathname || "";
-    const match = path.match(/\/chat\/(\d+)/);
+    const match = path.match(/\/chat\/([^/?#]+)/);
     if (match && typeof window !== "undefined" && window.innerWidth < 900) {
       setSelectedChatId(match[1]);
     }
@@ -718,10 +718,10 @@ const ChatHome = () => {
       await deleteChat(chatId);
 
       setChats((prevChats) =>
-        prevChats.filter((c) => c.chat_id !== chatId)
+        prevChats.filter((c) => String(c.chat_id) !== String(chatId))
       );
 
-      if (parseInt(selectedChatId) === parseInt(chatId)) {
+      if (selectedChatId != null && String(selectedChatId) === String(chatId)) {
         setSelectedChatId(null);
       }
     } catch (err) {
@@ -741,10 +741,10 @@ const ChatHome = () => {
       await exitGroupChat(selectedChatForMenu.chat_id);
 
       setChats((prevChats) =>
-        prevChats.filter((c) => c.chat_id !== selectedChatForMenu.chat_id)
+        prevChats.filter((c) => String(c.chat_id) !== String(selectedChatForMenu.chat_id))
       );
 
-      if (parseInt(selectedChatId) === parseInt(selectedChatForMenu.chat_id)) {
+      if (selectedChatId != null && String(selectedChatId) === String(selectedChatForMenu.chat_id)) {
         setSelectedChatId(null);
       }
     } catch (err) {
@@ -1098,7 +1098,7 @@ const ChatHome = () => {
     return (
       <div
         key={chat.chat_id}
-        className={`chat-item ${parseInt(selectedChatId) === parseInt(chat.chat_id) ? "selected" : ""
+        className={`chat-item ${selectedChatId != null && String(selectedChatId) === String(chat.chat_id) ? "selected" : ""
           } ${selectedChats[chat.chat_id] ? "selection" : ""}`}
         onMouseEnter={handleMouseEnter}
         onClick={(e) => {

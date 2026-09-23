@@ -1,7 +1,9 @@
 const { PrismaClient } = require('@prisma/client');
 const prisma = new PrismaClient();
 const aiService = require('../services/ai.service');
-const aiChatStream = require('../services/aiChatStream.service')
+const aiChatStream = require('../services/aiChatStream.service');
+const Chat = require('../models/mongo/Chat');
+const Message = require('../models/mongo/Message');
 
 const getRelativeTime = (date) => {
   const now = new Date();
@@ -26,37 +28,22 @@ exports.generateSmartReplies = async (req, res) => {
       return res.status(400).json({ error: 'chat_id is required' });
     }
 
-    const chatMember = await prisma.chatMember.findUnique({
-      where: {
-        chat_id_user_id: {
-          chat_id: parseInt(chat_id),
-          user_id: userId,
-        },
-      },
-    });
+    const chat = await Chat.findByChatId(chat_id);
+    if (!chat) {
+      return res.status(404).json({ error: 'Chat not found' });
+    }
 
-    if (!chatMember) {
+    const isMember = chat.members.some(m => m.user_id === userId);
+    if (!isMember) {
       return res.status(403).json({ error: 'You are not a member of this chat' });
     }
 
-    const messages = await prisma.message.findMany({
-      where: {
-        chat_id: parseInt(chat_id),
-        message_type: 'text',
-      },
-      include: {
-        sender: {
-          select: {
-            username: true,
-            full_name: true,
-          },
-        },
-      },
-      orderBy: {
-        created_at: 'desc',
-      },
-      take: 10,
-    });
+    const messages = await Message.find({
+      chat_id: chat.chat_id,
+      message_type: 'text'
+    })
+      .sort({ created_at: -1 })
+      .limit(10);
 
     if (messages.length === 0) {
       return res.status(400).json({
@@ -66,7 +53,7 @@ exports.generateSmartReplies = async (req, res) => {
     }
 
     const messageHistory = messages.reverse().map(msg => ({
-      sender: msg.sender.username || msg.sender.full_name || 'User',
+      sender: msg.sender?.username || msg.sender?.full_name || 'User',
       text: msg.message_text,
     }));
 
@@ -77,7 +64,7 @@ exports.generateSmartReplies = async (req, res) => {
 
     res.status(200).json({
       success: true,
-      chat_id: parseInt(chat_id),
+      chat_id: chat.chat_id,
       suggestions,
       context_messages: messages.length,
     });
@@ -99,24 +86,14 @@ exports.translateMessage = async (req, res) => {
     let messageText = text;
 
     if (message_id) {
-      const message = await prisma.message.findUnique({
-        where: { message_id: parseInt(message_id) },
-        include: {
-          chat: {
-            include: {
-              members: {
-                where: { user_id: userId },
-              },
-            },
-          },
-        },
-      });
+      const message = await Message.findByMessageId(message_id);
 
       if (!message) {
         return res.status(404).json({ error: 'Message not found' });
       }
 
-      if (message.chat.members.length === 0) {
+      const chat = await Chat.findByChatId(message.chat_id);
+      if (!chat || !chat.members.some(m => m.user_id === userId)) {
         return res.status(403).json({ error: 'You do not have access to this message' });
       }
 
@@ -153,37 +130,22 @@ exports.summarizeConversation = async (req, res) => {
       return res.status(400).json({ error: 'chat_id is required' });
     }
 
-    const chatMember = await prisma.chatMember.findUnique({
-      where: {
-        chat_id_user_id: {
-          chat_id: parseInt(chat_id),
-          user_id: userId,
-        },
-      },
-    });
+    const chat = await Chat.findByChatId(chat_id);
+    if (!chat) {
+      return res.status(404).json({ error: 'Chat not found' });
+    }
 
-    if (!chatMember) {
+    const isMember = chat.members.some(m => m.user_id === userId);
+    if (!isMember) {
       return res.status(403).json({ error: 'You are not a member of this chat' });
     }
 
-    const messages = await prisma.message.findMany({
-      where: {
-        chat_id: parseInt(chat_id),
-        message_type: 'text',
-      },
-      include: {
-        sender: {
-          select: {
-            username: true,
-            full_name: true,
-          },
-        },
-      },
-      orderBy: {
-        created_at: 'desc',
-      },
-      take: parseInt(message_count),
-    });
+    const messages = await Message.find({
+      chat_id: chat.chat_id,
+      message_type: 'text',
+    })
+      .sort({ created_at: -1 })
+      .limit(parseInt(message_count) || 50);
 
     if (messages.length === 0) {
       return res.status(400).json({
@@ -192,7 +154,7 @@ exports.summarizeConversation = async (req, res) => {
     }
 
     const formattedMessages = messages.reverse().map(msg => ({
-      sender: msg.sender.username || msg.sender.full_name || 'User',
+      sender: msg.sender?.username || msg.sender?.full_name || 'User',
       text: msg.message_text,
       timestamp: msg.created_at,
     }));
@@ -204,7 +166,7 @@ exports.summarizeConversation = async (req, res) => {
 
     res.status(200).json({
       success: true,
-      chat_id: parseInt(chat_id),
+      chat_id: chat.chat_id,
       summary,
       summary_type,
       messages_analyzed: messages.length,
@@ -245,23 +207,19 @@ exports.generateConversationStarters = async (req, res) => {
       return res.status(400).json({ error: 'chat_id is required' });
     }
 
-    const chat = await prisma.chat.findUnique({
-      where: { chat_id: parseInt(chat_id) },
-      include: {
-        members: true,
-      },
-    });
+    const chat = await Chat.findByChatId(chat_id);
 
     if (!chat) {
       return res.status(404).json({ error: 'Chat not found' });
     }
 
-    if (chat.members.length === 0) {
+    const isMember = chat.members.some(m => m.user_id === userId);
+    if (!isMember) {
       return res.status(403).json({ error: 'You are not a member of this chat' });
     }
 
     let recipientName = '';
-    if (chat.chat_type == 'private') {
+    if (chat.chat_type === 'private') {
       const otherMember = chat.members.find(member => member.user_id !== userId);
       if (otherMember) {
         const user = await prisma.user.findUnique({
@@ -273,13 +231,13 @@ exports.generateConversationStarters = async (req, res) => {
     }
 
     const context = {
-      chatType: chat.is_group_chat ? 'group' : 'direct',
+      chatType: chat.chat_type === 'group' ? 'group' : 'direct',
       chatName: chat.chat_name,
       recipientName
     };
 
     const starters = await aiService.generateConversationStarters(context);
-    res.status(200).json({ success: true, chat_id: parseInt(chat_id), starters });
+    res.status(200).json({ success: true, chat_id: chat.chat_id, starters });
   } catch (error) {
     console.error('[ai.generateConversationStarters]', error);
     res.status(500).json({ error: 'Failed to generate conversation starters', details: error.message });

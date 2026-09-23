@@ -553,10 +553,7 @@ const ChatWindow = ({
     socket.onAny(onAnyEvent);
 
     const handleNewMessage = (message) => {
-      const parsedChatId = parseInt(activeChatId);
-      const messageChatId = parseInt(message.chat_id);
-
-      if (messageChatId !== parsedChatId) {
+      if (String(message.chat_id) !== String(activeChatId)) {
         return;
       }
 
@@ -754,7 +751,7 @@ const ChatWindow = ({
     };
 
     const handleMemberAdded = (data) => {
-      if (data.chat_id !== parseInt(activeChatId)) {
+      if (String(data.chat_id) !== String(activeChatId)) {
         return;
       }
 
@@ -780,7 +777,7 @@ const ChatWindow = ({
     };
 
     const handleMemberExited = (data) => {
-      if (data.chat_id !== parseInt(activeChatId)) {
+      if (String(data.chat_id) !== String(activeChatId)) {
         return;
       }
 
@@ -949,13 +946,17 @@ const ChatWindow = ({
 
     const tempId = `temp_${Date.now()}_${Math.random()}`;
 
+    const targetReplyId = replyToMessage?.message_id || replyToMessage?.tempId || null;
+
     const messageData = {
-      chat_id: parseInt(activeChatId),
+      chat_id: activeChatId,
       sender_id: userId,
       message_text: messageToSend,
       message_type: "text",
       tempId: tempId,
-      reply_to_id: replyToMessage?.message_id || null,
+      reply_to_id: targetReplyId,
+      referenced_message_id: targetReplyId,
+      is_reply: !!targetReplyId,
     };
 
     socketService.sendMessage(messageData);
@@ -973,7 +974,11 @@ const ChatWindow = ({
       },
       status: [{ status: "sending" }],
       isOptimistic: true,
+      is_reply: !!targetReplyId,
+      referenced_message_id: targetReplyId,
+      referenced_message: replyToMessage,
       reply_to_message: replyToMessage,
+      reply_to_id: targetReplyId,
     };
 
     setMessages((prevMessages) => [...prevMessages, optimisticMessage]);
@@ -1030,10 +1035,15 @@ const ChatWindow = ({
   }, [chatId, currentChatId, userId]);
 
   const handleReplyMessage = (referenced_message) => {
-    const messageToReply = selectedMessage || referenced_message;
+    const messageToReply = (referenced_message && (referenced_message.message_id || referenced_message.tempId))
+      ? referenced_message
+      : selectedMessage;
     if (messageToReply) {
       setReplyToMessage(messageToReply);
       messageContextMenu.closeMenu();
+      if (messageInputRef?.current) {
+        messageInputRef.current.focus();
+      }
     }
   };
 
@@ -1631,14 +1641,18 @@ const ChatWindow = ({
         }));
         setUploadProgress(10);
 
+        const targetReplyId = replyToMessage?.message_id || replyToMessage?.tempId || null;
         const fileMessageData = {
-          chat_id: parseInt(activeChatId),
+          chat_id: activeChatId,
           message_text: messageText.trim() || "",
           fileBuffer: base64File,
           fileName: selectedFile.name,
           fileType: selectedFile.type,
           fileSize: selectedFile.size,
           tempId: tempId,
+          reply_to_id: targetReplyId,
+          referenced_message_id: targetReplyId,
+          is_reply: !!targetReplyId,
         };
 
         const optimisticMessage = {
@@ -1648,7 +1662,12 @@ const ChatWindow = ({
           isUploading: true,
           sender_id: userId,
           message_text: fileMessageData.message_text,
-          chat_id: parseInt(activeChatId),
+          chat_id: activeChatId,
+          is_reply: !!targetReplyId,
+          referenced_message_id: targetReplyId,
+          referenced_message: replyToMessage,
+          reply_to_message: replyToMessage,
+          reply_to_id: targetReplyId,
           attachments: [
             {
               file_url: "",
@@ -1683,6 +1702,7 @@ const ChatWindow = ({
         setSelectedFile(null);
         setShowFilePreview(false);
         setMessageText("");
+        setReplyToMessage(null);
       };
 
       reader.onerror = () => {
@@ -1734,9 +1754,31 @@ const ChatWindow = ({
     return name.substring(0, 2).toUpperCase();
   };
 
-  const getReferencedMessage = (referencedMessageId) => {
-    if (!referencedMessageId) return null;
-    return messages.find((msg) => msg.message_id === referencedMessageId);
+  const getReferencedMessage = (referencedMessageId, currentMessage = null) => {
+    if (!referencedMessageId && !currentMessage?.referenced_message && !currentMessage?.reply_to_message) return null;
+    if (referencedMessageId) {
+      const found = messages.find(
+        (msg) =>
+          String(msg.message_id) === String(referencedMessageId) ||
+          String(msg.tempId) === String(referencedMessageId)
+      );
+      if (found) return found;
+    }
+    return currentMessage?.referenced_message || currentMessage?.reply_to_message || null;
+  };
+
+  const scrollToReferencedMessage = (referencedMessageId) => {
+    if (!referencedMessageId) return;
+    const targetEl =
+      messageRefs.current[referencedMessageId] ||
+      document.getElementById(`message-${referencedMessageId}`);
+    if (targetEl) {
+      targetEl.scrollIntoView({ behavior: "smooth", block: "center" });
+      targetEl.classList.add("message-highlight");
+      setTimeout(() => {
+        targetEl.classList.remove("message-highlight");
+      }, 1500);
+    }
   };
 
   const handleMessageSelection = (message_id, isOwn) => {
@@ -1768,7 +1810,7 @@ const ChatWindow = ({
   const handleDeleteSelectedMessages = async () => {
     const selectedIds = Object.keys(selectedMessages).filter(
       (id) => selectedMessages[id]
-    ).map(id => parseInt(id));
+    );
 
     if (selectedIds.length === 0) {
       showError("No messages selected");
@@ -2065,7 +2107,8 @@ const ChatWindow = ({
                 return (
                   <>
                     <div
-                      key={message.message_id}
+                      key={message.message_id || message.tempId}
+                      id={`message-${message.message_id || message.tempId}`}
                       className={`message message-sent ${isCurrentResult(message.message_id)
                         ? "search-result-current"
                         : ""
@@ -2077,7 +2120,10 @@ const ChatWindow = ({
                         marginBottom: 8,
                       }}
                       ref={(el) => {
-                        if (el) messageRefs.current[message.message_id] = el;
+                        if (el) {
+                          if (message.message_id) messageRefs.current[message.message_id] = el;
+                          if (message.tempId) messageRefs.current[message.tempId] = el;
+                        }
                       }}
                       onClick={() => {
                         if (messageSelection)
@@ -2143,43 +2189,48 @@ const ChatWindow = ({
                                 <span>Forwarded</span>
                               </div>
                             )}
-                            {message.is_reply &&
-                              message.referenced_message_id && (
-                                <div className="message-reply-reference">
-                                  {(() => {
-                                    const refMsg = getReferencedMessage(
-                                      message.referenced_message_id
-                                    );
-                                    if (!refMsg) {
-                                      return (
-                                        <div className="reply-ref-deleted">
-                                          <span className="reply-ref-sender">
-                                            Deleted message
-                                          </span>
-                                        </div>
-                                      );
-                                    }
+                            {(message.is_reply || message.referenced_message_id || message.reply_to_id || message.referenced_message || message.reply_to_message) && (
+                              <div
+                                className="message-reply-reference clickable"
+                                title="Click to view message"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  scrollToReferencedMessage(message.referenced_message_id || message.reply_to_id);
+                                }}
+                              >
+                                {(() => {
+                                  const refId = message.referenced_message_id || message.reply_to_id;
+                                  const refMsg = getReferencedMessage(refId, message);
+                                  if (!refMsg) {
                                     return (
-                                      <>
-                                        <div className="reply-ref-sender">
-                                          {refMsg.sender?.full_name ||
-                                            refMsg.sender?.username ||
-                                            "Unknown"}
-                                        </div>
-                                        <div className="reply-ref-text">
-                                          {refMsg.message_text?.substring(
-                                            0,
-                                            80
-                                          ) || "[Attachment]"}
-                                          {refMsg.message_text?.length > 80
-                                            ? "..."
-                                            : ""}
-                                        </div>
-                                      </>
+                                      <div className="reply-ref-deleted">
+                                        <span className="reply-ref-sender">
+                                          Deleted message
+                                        </span>
+                                      </div>
                                     );
-                                  })()}
-                                </div>
-                              )}
+                                  }
+                                  return (
+                                    <>
+                                      <div className="reply-ref-sender">
+                                        {refMsg.sender?.full_name ||
+                                          refMsg.sender?.username ||
+                                          "Unknown"}
+                                      </div>
+                                      <div className="reply-ref-text">
+                                        {refMsg.message_text?.substring(
+                                          0,
+                                          80
+                                        ) || "[Attachment]"}
+                                        {refMsg.message_text?.length > 80
+                                          ? "..."
+                                          : ""}
+                                      </div>
+                                    </>
+                                  );
+                                })()}
+                              </div>
+                            )}
                             <p className="message-text">
                               {showSearch && searchQuery
                                 ? highlightText(
@@ -2251,7 +2302,8 @@ const ChatWindow = ({
               }
               return (
                 <div
-                  key={message.message_id}
+                  key={message.message_id || message.tempId}
+                  id={`message-${message.message_id || message.tempId}`}
                   className={`message message-received ${isCurrentResult(message.message_id)
                     ? "search-result-current"
                     : ""
@@ -2263,7 +2315,10 @@ const ChatWindow = ({
                     marginBottom: 8,
                   }}
                   ref={(el) => {
-                    if (el) messageRefs.current[message.message_id] = el;
+                    if (el) {
+                      if (message.message_id) messageRefs.current[message.message_id] = el;
+                      if (message.tempId) messageRefs.current[message.tempId] = el;
+                    }
                   }}
                   onClick={() => {
                     if (messageSelection)
@@ -2368,43 +2423,48 @@ const ChatWindow = ({
                               "Unknown User"}
                           </div>
                         )}
-                        {message.is_reply &&
-                          message.referenced_message_id && (
-                            <div className="message-reply-reference">
-                              {(() => {
-                                const refMsg = getReferencedMessage(
-                                  message.referenced_message_id
-                                );
-                                if (!refMsg) {
-                                  return (
-                                    <div className="reply-ref-deleted">
-                                      <span className="reply-ref-sender">
-                                        Deleted message
-                                      </span>
-                                    </div>
-                                  );
-                                }
+                        {(message.is_reply || message.referenced_message_id || message.reply_to_id || message.referenced_message || message.reply_to_message) && (
+                          <div
+                            className="message-reply-reference clickable"
+                            title="Click to view message"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              scrollToReferencedMessage(message.referenced_message_id || message.reply_to_id);
+                            }}
+                          >
+                            {(() => {
+                              const refId = message.referenced_message_id || message.reply_to_id;
+                              const refMsg = getReferencedMessage(refId, message);
+                              if (!refMsg) {
                                 return (
-                                  <>
-                                    <div className="reply-ref-sender">
-                                      {refMsg.sender?.full_name ||
-                                        refMsg.sender?.username ||
-                                        "Unknown"}
-                                    </div>
-                                    <div className="reply-ref-text">
-                                      {refMsg.message_text?.substring(
-                                        0,
-                                        80
-                                      ) || "[Attachment]"}
-                                      {refMsg.message_text?.length > 80
-                                        ? "..."
-                                        : ""}
-                                    </div>
-                                  </>
+                                  <div className="reply-ref-deleted">
+                                    <span className="reply-ref-sender">
+                                      Deleted message
+                                    </span>
+                                  </div>
                                 );
-                              })()}
-                            </div>
-                          )}
+                              }
+                              return (
+                                <>
+                                  <div className="reply-ref-sender">
+                                    {refMsg.sender?.full_name ||
+                                      refMsg.sender?.username ||
+                                      "Unknown"}
+                                  </div>
+                                  <div className="reply-ref-text">
+                                    {refMsg.message_text?.substring(
+                                      0,
+                                      80
+                                    ) || "[Attachment]"}
+                                    {refMsg.message_text?.length > 80
+                                      ? "..."
+                                      : ""}
+                                  </div>
+                                </>
+                              );
+                            })()}
+                          </div>
+                        )}
                         <p className="message-text">
                           {showSearch && searchQuery
                             ? highlightText(message.message_text, searchQuery)

@@ -21,6 +21,19 @@ services:
       timeout: 5s
       retries: 5
 
+  mongo:
+    image: mongo:7.0
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo-data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+
   api-server:
     build: ./server
     command: sh -c "npx prisma migrate deploy && node src/server.js"
@@ -31,11 +44,14 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+      mongo:
+        condition: service_healthy
     env_file:
       - ./server/.env
     environment:
       DATABASE_URL: mysql://root:secret@mysql:3306/swifttalk
       REDIS_URL: redis://redis:6379
+      MONGODB_URI: mongodb://mongo:27017/swifttalk
       PORT: 3001
     healthcheck:
       test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:3001/health"]
@@ -54,11 +70,14 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+      mongo:
+        condition: service_healthy
     env_file:
       - ./server/.env
     environment:
       DATABASE_URL: mysql://root:secret@mysql:3306/swifttalk
       REDIS_URL: redis://redis:6379
+      MONGODB_URI: mongodb://mongo:27017/swifttalk
       WS_PORT: 3002
     healthcheck:
       test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:3002/health"]
@@ -89,3 +108,4 @@ services:
 
 volumes:
   mysql-data:
+  mongo-data:

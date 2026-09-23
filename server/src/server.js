@@ -5,6 +5,7 @@ const path = require('path');
 const { initSocketEmitter } = require('./socket/socketEmitter');
 const { testConnection } = require('./config/database');
 const { initRedis, closeRedis, isAvailable: isRedisAvailable } = require('./config/redis');
+const { connectMongo, disconnectMongo, isMongoConnected } = require('./config/mongo');
 const { initSessionCleanupCron } = require("./cron/sessionCleanup")
 const passport = require('./config/passport');
 
@@ -124,10 +125,12 @@ app.use((err, req, res, next) => {
 app.get('/health', async (req, res) => {
   const dbStatus = await testConnection();
   const redisStatus = isRedisAvailable();
+  const mongoStatus = isMongoConnected();
   res.json({
     service: 'api',
     status: 'running',
     database: dbStatus ? 'connected' : 'disconnected',
+    mongodb: mongoStatus ? 'connected' : 'disconnected',
     redis: redisStatus ? 'connected' : 'fallback (in-memory)',
     mode: redisStatus ? 'full' : 'degraded'
   });
@@ -135,12 +138,14 @@ app.get('/health', async (req, res) => {
 
 process.on('SIGTERM', async () => {
   console.log('SIGTERM received. Shutting down gracefully...');
+  await disconnectMongo();
   await closeRedis();
   process.exit(0);
 });
 
 process.on('SIGINT', async () => {
   console.log('SIGINT received. Shutting down gracefully...');
+  await disconnectMongo();
   await closeRedis();
   process.exit(0);
 });
@@ -164,6 +169,9 @@ async function startServer() {
   if (!dbConnected) {
     process.exit(1);
   }
+
+  // Connect to MongoDB for chats and messages
+  await connectMongo();
 
   try {
     await initRedis();

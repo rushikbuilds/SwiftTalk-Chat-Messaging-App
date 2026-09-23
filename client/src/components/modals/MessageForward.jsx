@@ -194,7 +194,7 @@ const MessageForward = ({ onClose, userId, messageId, onForward, currentChatId }
 
     const filteredChats = chats.filter((chat) => {
         // Exclude the current chat from forward options
-        if (currentChatId && chat.chat_id === parseInt(currentChatId)) {
+        if (currentChatId && String(chat.chat_id) === String(currentChatId)) {
             return false;
         }
 

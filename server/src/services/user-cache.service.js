@@ -7,6 +7,7 @@
 const { getCache, setCache, deleteCache, getCached, deleteCacheByPattern } = require('./cache.service');
 const { PrismaClient } = require('@prisma/client');
 const prisma = new PrismaClient();
+const { Chat } = require('../models/mongo');
 
 // TTL configurations (in seconds)
 const USER_PROFILE_TTL = 3600; // 1 hour
@@ -86,27 +87,18 @@ const getChatMemberships = async (userId) => {
   return await getCached(
     `user:chats:${userId}`,
     async () => {
-      const memberships = await prisma.chatMember.findMany({
-        where: { user_id: userId },
-        include: {
-          chat: {
-            select: {
-              chat_id: true,
-              chat_name: true,
-              chat_type: true,
-              created_at: true
-            }
-          }
-        }
-      });
+      const chatsFromDb = await Chat.find({ 'members.user_id': userId }).lean();
 
-      const chats = memberships.map(m => ({
-        chat_id: m.chat.chat_id,
-        chat_name: m.chat.chat_name,
-        chat_type: m.chat.chat_type,
-        created_at: m.chat.created_at,
-        is_pinned: m.is_pinned || false
-      }));
+      const chats = chatsFromDb.map(c => {
+        const member = (c.members || []).find(m => m.user_id === userId);
+        return {
+          chat_id: c.chat_id,
+          chat_name: c.chat_name,
+          chat_type: c.chat_type,
+          created_at: c.created_at,
+          is_pinned: member?.is_pinned || false
+        };
+      });
 
       return chats.length > 0 ? chats : null;
     },

@@ -444,8 +444,42 @@
   text-overflow: ellipsis;
 }
 
-.message-sent .reply-ref-text {
-  color: rgba(255, 255, 255, 0.75);
+.message-reply-reference.clickable {
+  cursor: pointer;
+  user-select: none;
+  transition: opacity 0.18s ease, transform 0.18s ease, background 0.18s ease;
+}
+
+.message-reply-reference.clickable:hover {
+  opacity: 0.85;
+  transform: translateY(-1px);
+}
+
+.message-sent .message-reply-reference.clickable:hover {
+  background: rgba(255, 255, 255, 0.18);
+}
+
+.message-received .message-reply-reference.clickable:hover {
+  background: rgba(var(--accent-color-rgb, 59, 130, 246), 0.14);
+}
+
+.message-highlight {
+  animation: messageHighlightPulse 1.6s ease-in-out;
+}
+
+@keyframes messageHighlightPulse {
+  0% {
+    box-shadow: 0 0 0 0 rgba(var(--accent-color-rgb, 59, 130, 246), 0.75);
+    transform: scale(1);
+  }
+  35% {
+    box-shadow: 0 0 0 8px rgba(var(--accent-color-rgb, 59, 130, 246), 0.35);
+    transform: scale(1.02);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(var(--accent-color-rgb, 59, 130, 246), 0);
+    transform: scale(1);
+  }
 }
 
 .message-meta {

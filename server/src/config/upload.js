@@ -33,6 +33,30 @@ const upload = multer({
   limits: { fileSize: MAX_FILE_SIZE }
 });
 
+const uploadProfile = multer({
+  storage,
+  fileFilter: (req, file, cb) => {
+    if (!file.mimetype.startsWith('image/')) {
+      return cb(new Error('Only image files are allowed for profile pictures'), false);
+    }
+    cb(null, true);
+  },
+  limits: { fileSize: 10 * 1024 * 1024 }
+});
+
+const uploadGroup = multer({
+  storage,
+  fileFilter: (req, file, cb) => {
+    if (!file.mimetype.startsWith('image/')) {
+      return cb(new Error('Only image files are allowed for group images'), false);
+    }
+    cb(null, true);
+  },
+  limits: { fileSize: 10 * 1024 * 1024 }
+});
+
+const uploadFiles = upload;
+
 const getFileTypeCategory = (mimetype) => {
   const typeMap = [
     [/^image\//, 'image'],
@@ -49,4 +73,10 @@ const getFileTypeCategory = (mimetype) => {
   return match ? match[1] : 'file';
 };
 
-module.exports = { upload, getFileTypeCategory };
+module.exports = {
+  upload,
+  uploadProfile,
+  uploadGroup,
+  uploadFiles,
+  getFileTypeCategory
+};

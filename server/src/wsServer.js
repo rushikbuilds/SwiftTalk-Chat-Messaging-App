@@ -11,6 +11,7 @@ dotenv.config({ path: envPath });
 
 const { initializeSocket, setupRedisAdapter } = require('./socket/socketHandler');
 const { initRedis, closeRedis, isAvailable: isRedisAvailable } = require('./config/redis');
+const { connectMongo, disconnectMongo, isMongoConnected } = require('./config/mongo');
 
 const app = express();
 const server = http.createServer(app);
@@ -75,10 +76,12 @@ app.get('/', (req, res) => {
 
 app.get('/health', (req, res) => {
   const redisStatus = isRedisAvailable();
+  const mongoStatus = isMongoConnected();
   res.json({
     service: 'websocket',
     status: 'running',
     connections: io.engine ? io.engine.clientsCount : 0,
+    mongodb: mongoStatus ? 'connected' : 'disconnected',
     redis: redisStatus ? 'connected' : 'fallback (in-memory)',
     mode: redisStatus ? 'cluster' : 'single-node'
   });
@@ -96,6 +99,7 @@ const closeGracefully = async (signal) => {
   } catch (err) {
     console.warn('[wsServer] Error closing io:', err.message);
   }
+  await disconnectMongo();
   await closeRedis();
   server.close(() => {
     console.log('[wsServer] HTTP server closed.');
@@ -120,6 +124,8 @@ process.on('unhandledRejection', (reason) => {
 const WS_PORT = process.env.WS_PORT || 3002;
 
 async function startWsServer() {
+  await connectMongo();
+
   try {
     await initRedis();
     console.log('[wsServer] Redis connected successfully.');
